@@ -1,0 +1,10 @@
+The default reproducible run is prepared for 2 example sequences in the file \data\inputs\CAID2-test.fasta. You can put any number of sequences in the FASTA file, they will all be processed by DisorderUnetLM.
+
+The input and output formats are based on the CAID challenge requirements (https://caid.idpcentral.org/challenge)
+
+The resulting disorder predictions are saved in separate text files for each sequence and have the following format (index, aminoacid, disorder probability, binary disorder prediction)
+
+>P04637
+ 1    M    0.892    1
+ 2    E    0.813    1
+ ...
