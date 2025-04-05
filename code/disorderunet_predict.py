@@ -53,8 +53,11 @@ class OfflineProtTransT5XLU50Embedder(ProtTransT5XLU50Embedder):
 
     def get_model(self):
         if not self._decoder:
+            print('a')
+            # model = T5EncoderModel.from_pretrained("Rostlab/prot_t5_xl_uniref50")
             model = T5EncoderModel.from_pretrained(self._model_directory)
         else:
+            print('b')
             model = T5Model.from_pretrained(self._model_directory)
         return model
 

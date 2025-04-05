@@ -1,16 +1,20 @@
 import os
+import csv
 from glob import glob
 import numpy as np
 from tensorflow.keras.utils import to_categorical
 from collections import defaultdict
 from copy import deepcopy
+import pandas as pd
+from transformers import T5Model, T5EncoderModel
+from bio_embeddings.embed import ProtTransT5XLU50Embedder
 
 # define problem properties
 FASTA_RESIDUE_LIST = ["A", "D", "N", "R", "C", "E", "Q", "G", "H", "I",
                       "L", "K", "M", "F", "P", "S", "T", "W", "Y", "V"]
 NB_RESIDUES = len(FASTA_RESIDUE_LIST)
 RESIDUE_DICT = dict(zip(FASTA_RESIDUE_LIST, range(NB_RESIDUES)))
-UPPER_LENGTH_LIMIT = 7168
+UPPER_LENGTH_LIMIT = 1000
 
 
 def read_fasta(filepath: str):
@@ -39,6 +43,56 @@ def read_fasta(filepath: str):
     print(len(data_dict), "proteins loaded")
 
     return data_dict
+
+def read_train_csv(filepath: str):
+
+    data_dict = defaultdict(dict)
+
+    # Load entire CSV as DataFrame
+    df = pd.read_csv(filepath)
+    df = df.dropna(subset=['rcl_seq']) # get rid of rows without annotation 
+    df = df[df["Sequence"].str.len() <= UPPER_LENGTH_LIMIT]
+
+    print("Loading ProtTrans model")   
+    embedder = OfflineProtTransT5XLU50Embedder()
+    
+    # Iterate row by row
+    for _, row in df.iterrows():
+
+        protein_id = row["id"].strip()
+
+        # fasta
+        sequence = row["Sequence"].strip()
+        data_dict[protein_id]["sequence"] = sequence
+
+        # label 
+        rcl_start = int(row['rcl_start'])
+        rcl_end = int(row['rcl_end'])
+
+        seq_len = len(sequence)
+        rcl_label = np.full((UPPER_LENGTH_LIMIT, 2), [1, 0], dtype=np.float32)  # all non-RCL by default
+
+        # Apply RCL labels (convert to 0-based indexing)
+        rcl_start_idx = max(0, rcl_start - 1)
+        rcl_end_idx = min(seq_len, rcl_end)  # do not exceed actual length
+
+        for i in range(rcl_start_idx, rcl_end_idx):
+            rcl_label[i] = [0, 1]
+
+        # Mask out padding if sequence is shorter than max_length
+        for i in range(seq_len, UPPER_LENGTH_LIMIT):
+            rcl_label[i] = [9999, 9999]
+
+        data_dict[protein_id]['label'] = rcl_label
+
+    # prottrans    
+    for protein_name in data_dict:
+        encoded_sequence = "".join([FASTA_RESIDUE_LIST[idx] for idx in np.argmax(data_dict[protein_name]["fasta"], axis=-1)])
+        data_dict[protein_name]["prottrans"] = embedder.embed(encoded_sequence)
+    
+    return data_dict
+
+
 
 
 def standardize_data(data_dict: dict):
@@ -71,3 +125,20 @@ def fill_with_zeros(data: dict, max_sequence_length: int):
         data_copy[key] = fill_array_with_value(values, max_sequence_length, 0)
 
     return data_copy
+
+class OfflineProtTransT5XLU50Embedder(ProtTransT5XLU50Embedder):
+    # Use an offline model directory
+    def __init__(self, **kwargs):
+        self.necessary_directories = []
+        super().__init__(model_directory=os.path.join('../data/models', "prot_t5_xl_uniref50"))
+        self._half_precision_model = False
+
+    def get_model(self):
+        if not self._decoder:
+            print('a')
+            # model = T5EncoderModel.from_pretrained("Rostlab/prot_t5_xl_uniref50")
+            model = T5EncoderModel.from_pretrained(self._model_directory)
+        else:
+            print('b')
+            model = T5Model.from_pretrained(self._model_directory)
+        return model
