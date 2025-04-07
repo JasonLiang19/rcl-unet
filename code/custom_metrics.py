@@ -1,6 +1,10 @@
 import tensorflow as tf
 tf.random.set_seed(1992)
 from tensorflow.keras import backend as K
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
 
 MASK_VALUE = 9999
 
@@ -42,3 +46,32 @@ def mcc_metric(y_true_org, y_pred_prg):
       * (true_neg + false_pos) * (true_neg + false_neg), tf.float32)
     return tf.cast((true_pos * true_neg) - (false_pos * false_neg), tf.float32) / tf.sqrt(x)
 
+def get_confusion_matrix(y_true, y_pred, mask_value=MASK_VALUE):
+    
+    # Mask out padding
+    valid_mask = ~np.all(y_true == mask_value, axis=-1)
+    y_true_clean = y_true[valid_mask]
+    y_pred_clean = y_pred[valid_mask]
+
+    # Convert to class indices
+    y_true_idx = np.argmax(y_true_clean, axis=-1)
+    y_pred_idx = np.argmax(y_pred_clean, axis=-1)
+
+    # compute confusion matrix
+    cm = confusion_matrix(y_true_idx, y_pred_idx)
+
+    # plot 
+    labels = [
+        ["True non-RCL", "False RCL"],
+        ["False non-RCL", "True RCL"]
+    ]
+
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", square=True, cbar=False,
+                xticklabels=["Pred non-RCL", "Pred RCL"],
+                yticklabels=["True non-RCL", "True RCL"])
+    plt.title("Confusion Matrix")
+    plt.ylabel("Actual")
+    plt.xlabel("Predicted")
+    plt.tight_layout()
+    plt.show()

@@ -2,7 +2,7 @@ import glob
 import os
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.layers import Lambda, add, multiply, BatchNormalization, Dense, Dropout, Input, Average, Conv1D, Concatenate, AvgPool1D, UpSampling1D, Reshape, Activation
+from tensorflow.keras.layers import Lambda, add, multiply, BatchNormalization, Dense, Dropout, Input, Average, Conv1D, Concatenate, AvgPool1D, UpSampling1D, Reshape, Activation, Cropping1D, ZeroPadding1D
 from custom_metrics import *
 from data_loading import NB_RESIDUES, UPPER_LENGTH_LIMIT
 
@@ -24,6 +24,14 @@ def AttnGatingBlock(x, g, inter_shape):
 
     # Getting the x signal to the same shape as the gating signal
     theta_x = Conv1D(filters=inter_shape, kernel_size=3, strides=shape_x[1] // shape_g[1], padding='same')(x)
+
+    # Align sequence lengths
+    len_phi = K.int_shape(phi_g)[1]
+    len_theta = K.int_shape(theta_x)[1]
+    if len_phi > len_theta:
+        phi_g = Cropping1D((0, len_phi - len_theta))(phi_g)
+    elif len_theta > len_phi:
+        phi_g = ZeroPadding1D((0, len_theta - len_phi))(phi_g)
 
     # Element-wise addition of the gating and x signals
     add_xg = add([phi_g, theta_x])

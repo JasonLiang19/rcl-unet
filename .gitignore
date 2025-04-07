@@ -1,3 +1,5 @@
 /data/
 /environment/
 /code/venv/
+code/processed_dict_1024.pkl
+code/processed_dict.pkl

@@ -8,13 +8,14 @@ from copy import deepcopy
 import pandas as pd
 from transformers import T5Model, T5EncoderModel
 from bio_embeddings.embed import ProtTransT5XLU50Embedder
+from tqdm import tqdm 
 
 # define problem properties
 FASTA_RESIDUE_LIST = ["A", "D", "N", "R", "C", "E", "Q", "G", "H", "I",
                       "L", "K", "M", "F", "P", "S", "T", "W", "Y", "V"]
 NB_RESIDUES = len(FASTA_RESIDUE_LIST)
 RESIDUE_DICT = dict(zip(FASTA_RESIDUE_LIST, range(NB_RESIDUES)))
-UPPER_LENGTH_LIMIT = 1000
+UPPER_LENGTH_LIMIT = 1024
 
 
 def read_fasta(filepath: str):
@@ -65,6 +66,10 @@ def read_train_csv(filepath: str):
         sequence = row["Sequence"].strip()
         data_dict[protein_id]["sequence"] = sequence
 
+        # one-hot encoded sequence 
+        encoded_sequence = to_categorical([RESIDUE_DICT[residue] for residue in sequence], num_classes=NB_RESIDUES)
+        data_dict[protein_id]["one-hot"] = encoded_sequence
+
         # label 
         rcl_start = int(row['rcl_start'])
         rcl_end = int(row['rcl_end'])
@@ -86,9 +91,9 @@ def read_train_csv(filepath: str):
         data_dict[protein_id]['label'] = rcl_label
 
     # prottrans    
-    for protein_name in data_dict:
-        encoded_sequence = "".join([FASTA_RESIDUE_LIST[idx] for idx in np.argmax(data_dict[protein_name]["fasta"], axis=-1)])
-        data_dict[protein_name]["prottrans"] = embedder.embed(encoded_sequence)
+    for protein_name in tqdm(data_dict, desc='Calculating ProtTrans Features'):
+        # uses unencoded sequence
+        data_dict[protein_name]["prottrans"] = embedder.embed(data_dict[protein_name]["sequence"])
     
     return data_dict
 
