@@ -9,6 +9,7 @@ import pandas as pd
 from transformers import T5Model, T5EncoderModel
 from bio_embeddings.embed import ProtTransT5XLU50Embedder
 from tqdm import tqdm 
+import json
 
 # define problem properties
 FASTA_RESIDUE_LIST = ["A", "D", "N", "R", "C", "E", "Q", "G", "H", "I",
@@ -18,34 +19,34 @@ RESIDUE_DICT = dict(zip(FASTA_RESIDUE_LIST, range(NB_RESIDUES)))
 UPPER_LENGTH_LIMIT = 1024
 
 
-def read_fasta(filepath: str):
-    # Read all non-empty lines from FASTA
-    with open(filepath, 'r') as reader:
-        lines = [line.strip() for line in reader if line.strip() != '']
+# def read_fasta(filepath: str):
+#     # Read all non-empty lines from FASTA
+#     with open(filepath, 'r') as reader:
+#         lines = [line.strip() for line in reader if line.strip() != '']
     
-    protein_names = []
-    sequences = []
-    new_sequence = True
-    for line in lines:
-        if line.startswith((">", ";")):
-            protein_names.append(line[1:].strip())
-            new_sequence = True
-        elif new_sequence:
-            sequences.append(line)
-            new_sequence = False
-        else:
-            sequences[-1] = f"{sequences[-1]}{line}"
+#     protein_names = []
+#     sequences = []
+#     new_sequence = True
+#     for line in lines:
+#         if line.startswith((">", ";")):
+#             protein_names.append(line[1:].strip())
+#             new_sequence = True
+#         elif new_sequence:
+#             sequences.append(line)
+#             new_sequence = False
+#         else:
+#             sequences[-1] = f"{sequences[-1]}{line}"
     
-    data_dict = defaultdict(dict)
-    for protein_name, resnames in zip(protein_names, sequences):
-        sequence = to_categorical([RESIDUE_DICT[residue] for residue in resnames], num_classes=NB_RESIDUES)
-        data_dict[protein_name]["fasta"] = sequence
+#     data_dict = defaultdict(dict)
+#     for protein_name, resnames in zip(protein_names, sequences):
+#         sequence = to_categorical([RESIDUE_DICT[residue] for residue in resnames], num_classes=NB_RESIDUES)
+#         data_dict[protein_name]["fasta"] = sequence
 
-    print(len(data_dict), "proteins loaded")
+#     print(len(data_dict), "proteins loaded")
 
-    return data_dict
+#     return data_dict
 
-def read_train_csv(filepath: str):
+def read_train_csv(filepath: str, encoding: str):
 
     data_dict = defaultdict(dict)
 
@@ -53,9 +54,6 @@ def read_train_csv(filepath: str):
     df = pd.read_csv(filepath)
     df = df.dropna(subset=['rcl_seq']) # get rid of rows without annotation 
     df = df[df["Sequence"].str.len() <= UPPER_LENGTH_LIMIT]
-
-    print("Loading ProtTrans model")   
-    embedder = OfflineProtTransT5XLU50Embedder()
     
     # Iterate row by row
     for _, row in df.iterrows():
@@ -91,9 +89,21 @@ def read_train_csv(filepath: str):
         data_dict[protein_id]['label'] = rcl_label
 
     # prottrans    
-    for protein_name in tqdm(data_dict, desc='Calculating ProtTrans Features'):
-        # uses unencoded sequence
-        data_dict[protein_name]["prottrans"] = embedder.embed(data_dict[protein_name]["sequence"])
+    if (encoding == 'prottrans'):
+        print("Loading ProtTrans model")   
+        embedder = OfflineProtTransT5XLU50Embedder()
+        for protein_name in tqdm(data_dict, desc='Calculating ProtTrans Features'):
+            # uses unencoded sequence
+            data_dict[protein_name]["encoding"] = embedder.embed(data_dict[protein_name]["sequence"])
+
+    # one-hot
+    if (encoding == 'onehot'):
+        with open("../data/encodings/One_hot.json") as f:
+            encoding_map = json.load(f)
+        for protein_name in tqdm(data_dict, desc='Generating One-hot Encodings'):
+            sequence = data_dict[protein_name]["sequence"]
+            one_hot_encoded = [encoding_map.get(residue, encoding_map["X"]) for residue in sequence]
+            data_dict[protein_name]["encoding"] = np.array(one_hot_encoded, dtype=np.float32)
     
     return data_dict
 
@@ -140,10 +150,10 @@ class OfflineProtTransT5XLU50Embedder(ProtTransT5XLU50Embedder):
 
     def get_model(self):
         if not self._decoder:
-            print('a')
+            print('Using T5EncoderModel')
             # model = T5EncoderModel.from_pretrained("Rostlab/prot_t5_xl_uniref50")
             model = T5EncoderModel.from_pretrained(self._model_directory)
         else:
-            print('b')
+            print('Using T5Model')
             model = T5Model.from_pretrained(self._model_directory)
         return model

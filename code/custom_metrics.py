@@ -4,7 +4,9 @@ from tensorflow.keras import backend as K
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import confusion_matrix, f1_score
+from sklearn.metrics import confusion_matrix, f1_score, roc_auc_score
+import csv
+import os
 
 MASK_VALUE = 9999
 
@@ -31,6 +33,24 @@ def masked_f1(y_true, y_pred, average='binary'):
 
     # Compute F1
     return f1_score(y_true_idx, y_pred_idx, average=average)
+
+def masked_auc(y_true, y_pred):
+
+     # Flatten to 2D: (N * 1000, 2)
+    y_true = np.reshape(y_true, (-1, 2))
+    y_pred = np.reshape(y_pred, (-1, 2))
+
+    # Mask out padded values
+    valid_mask = ~np.all(y_true == MASK_VALUE, axis=-1)
+    y_true_clean = y_true[valid_mask]
+    y_pred_clean = y_pred[valid_mask]
+
+    # Convert to class indices
+    y_true_idx = np.argmax(y_true_clean, axis=-1)
+    y_pred_idx = np.argmax(y_pred_clean, axis=-1)
+
+    # Compute F1
+    return roc_auc_score(y_true_idx, y_pred_idx)
 
 def mcc_cc_loss(y_true_org, y_pred_org):
     mask = tf.reduce_any(tf.not_equal(y_true_org, MASK_VALUE), -1)
@@ -94,7 +114,7 @@ def get_confusion_matrix(y_true, y_pred, output_dir='cm.png'):
     plt.xlabel("Predicted")
     plt.tight_layout()
     
-    plt.savefig(output_dir)
+    plt.savefig(os.path.join(output_dir, "confusion matrix.png"))
 
 def get_histogram(y_true, y_pred, output_dir='hist.png'):
 
@@ -131,4 +151,15 @@ def get_histogram(y_true, y_pred, output_dir='hist.png'):
     plt.title("Residue Misclassifications per Protein")
     plt.grid(axis='y')
     plt.tight_layout()
-    plt.show()
+    plt.savefig(os.path.join(output_dir, "histogram.png"))
+
+    # Count how many proteins had each number of errors
+    error_values, protein_counts = np.unique(errors_per_protein, return_counts=True)
+
+    # Save as CSV: num_errors, num_proteins
+    hist_csv_path = os.path.join(output_dir, "error_counts.csv")
+    with open(hist_csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["num_errors", "num_proteins"])
+        for num_errors, num_proteins in zip(error_values, protein_counts):
+            writer.writerow([num_errors, num_proteins])
