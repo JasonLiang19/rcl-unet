@@ -46,13 +46,12 @@ UPPER_LENGTH_LIMIT = 1024
 
 #     return data_dict
 
-def read_train_csv(filepath: str, encoding: str):
+def read_seq_csv(filepath: str, encoding: str):
 
     data_dict = defaultdict(dict)
 
     # Load entire CSV as DataFrame
     df = pd.read_csv(filepath)
-    df = df.dropna(subset=['rcl_seq']) # get rid of rows without annotation 
     df = df[df["Sequence"].str.len() <= UPPER_LENGTH_LIMIT]
     
     # Iterate row by row
@@ -65,25 +64,26 @@ def read_train_csv(filepath: str, encoding: str):
         data_dict[protein_id]["sequence"] = sequence
 
         # one-hot encoded sequence 
-        encoded_sequence = to_categorical([RESIDUE_DICT[residue] for residue in sequence], num_classes=NB_RESIDUES)
-        data_dict[protein_id]["one-hot"] = encoded_sequence
+        # encoded_sequence = to_categorical([RESIDUE_DICT[residue] for residue in sequence], num_classes=NB_RESIDUES)
+        # data_dict[protein_id]["one-hot"] = encoded_sequence
 
-        # label 
-        rcl_start = int(row['rcl_start'])
-        rcl_end = int(row['rcl_end'])
-
-        seq_len = len(sequence)
+        # create labels 
         rcl_label = np.full((UPPER_LENGTH_LIMIT, 2), [1, 0], dtype=np.float32)  # all non-RCL by default
 
         # Apply RCL labels (convert to 0-based indexing)
-        rcl_start_idx = max(0, rcl_start - 1)
-        rcl_end_idx = min(seq_len, rcl_end)  # do not exceed actual length
+        if 'rcl_seq' in df.columns:
+            df = df.dropna(subset=['rcl_seq']) # get rid of rows without annotation 
 
-        for i in range(rcl_start_idx, rcl_end_idx):
-            rcl_label[i] = [0, 1]
+            rcl_start = int(row['rcl_start'])
+            rcl_end = int(row['rcl_end'])
+            rcl_start_idx = max(0, rcl_start - 1)
+            rcl_end_idx = min(len(sequence), rcl_end)  # do not exceed actual length
+
+            for i in range(rcl_start_idx, rcl_end_idx):
+                rcl_label[i] = [0, 1]
 
         # Mask out padding if sequence is shorter than max_length
-        for i in range(seq_len, UPPER_LENGTH_LIMIT):
+        for i in range(len(sequence), UPPER_LENGTH_LIMIT):
             rcl_label[i] = [9999, 9999]
 
         data_dict[protein_id]['label'] = rcl_label
@@ -104,10 +104,17 @@ def read_train_csv(filepath: str, encoding: str):
             sequence = data_dict[protein_name]["sequence"]
             one_hot_encoded = [encoding_map.get(residue, encoding_map["X"]) for residue in sequence]
             data_dict[protein_name]["encoding"] = np.array(one_hot_encoded, dtype=np.float32)
+
+    # BLOSUM
+    if (encoding == 'blosum'):
+        with open("../data/encodings/BLOSUM62.json") as f:
+            encoding_map = json.load(f)
+        for protein_name in tqdm(data_dict, desc='Generating BLOSUM62 Encodings'):
+            sequence = data_dict[protein_name]["sequence"]
+            blosum_encoded = [encoding_map.get(residue, encoding_map["X"]) for residue in sequence]
+            data_dict[protein_name]["encoding"] = np.array(blosum_encoded, dtype=np.float32)
     
     return data_dict
-
-
 
 
 def standardize_data(data_dict: dict):
@@ -157,3 +164,91 @@ class OfflineProtTransT5XLU50Embedder(ProtTransT5XLU50Embedder):
             print('Using T5Model')
             model = T5Model.from_pretrained(self._model_directory)
         return model
+    
+def process_non_serpins():
+    # Replace this with your actual file path
+    input_file = "../data/non serpins.tsv"
+
+    # Load the full UniProt TSV
+    df = pd.read_csv(input_file, sep='\t')
+    df.rename(columns={'Entry': 'id'}, inplace=True)
+
+    # Check number of entries
+    print(f"Total entries loaded: {len(df)}")
+
+    # Filter out sequences containing 'X'
+    filtered_df = df[~df['Sequence'].str.contains('X', na=False)]
+    print(f"Remaining entries after removing sequences with 'X': {len(filtered_df)}")
+
+    # randomly split remaining samples
+    train_df = df.sample(frac=.5)
+    test_df = df.drop(train_df.index)
+
+    # Randomly sample from each (set random_state for reproducibility)
+    train_sample = train_df.sample(n=2048, random_state=42)
+    test_sample = test_df.sample(n=1024, random_state=42)
+
+    # Save to new TSV
+    train_sample.to_csv("../data/non_serpin_train.csv", index=False)
+    test_sample.to_csv("../data/non_serpin_test.csv", index=False)
+
+
+
+
+# def read_non_serpin(filepath: str, encoding: str):
+
+#     data_dict = defaultdict(dict)
+
+#     # Load entire CSV as DataFrame
+#     df = pd.read_csv(filepath)
+#     df = df[df["Sequence"].str.len() <= UPPER_LENGTH_LIMIT]
+    
+#     # Iterate row by row
+#     for _, row in df.iterrows():
+
+#         protein_id = row["id"].strip()
+
+#         # fasta
+#         sequence = row["Sequence"].strip()
+#         data_dict[protein_id]["sequence"] = sequence
+
+#         # one-hot encoded sequence 
+#         encoded_sequence = to_categorical([RESIDUE_DICT[residue] for residue in sequence], num_classes=NB_RESIDUES)
+#         data_dict[protein_id]["one-hot"] = encoded_sequence
+
+#         seq_len = len(sequence)
+#         rcl_label = np.full((UPPER_LENGTH_LIMIT, 2), [1, 0], dtype=np.float32)  # all non-RCL by default
+
+#         # Mask out padding if sequence is shorter than max_length
+#         for i in range(seq_len, UPPER_LENGTH_LIMIT):
+#             rcl_label[i] = [9999, 9999]
+
+#         data_dict[protein_id]['label'] = rcl_label
+
+#     # prottrans    
+#     if (encoding == 'prottrans'):
+#         print("Loading ProtTrans model")   
+#         embedder = OfflineProtTransT5XLU50Embedder()
+#         for protein_name in tqdm(data_dict, desc='Calculating ProtTrans Features'):
+#             # uses unencoded sequence
+#             data_dict[protein_name]["encoding"] = embedder.embed(data_dict[protein_name]["sequence"])
+
+#     # one-hot
+#     if (encoding == 'onehot'):
+#         with open("../data/encodings/One_hot.json") as f:
+#             encoding_map = json.load(f)
+#         for protein_name in tqdm(data_dict, desc='Generating One-hot Encodings'):
+#             sequence = data_dict[protein_name]["sequence"]
+#             one_hot_encoded = [encoding_map.get(residue, encoding_map["X"]) for residue in sequence]
+#             data_dict[protein_name]["encoding"] = np.array(one_hot_encoded, dtype=np.float32)
+
+#     # BLOSUM
+#     if (encoding == 'blosum'):
+#         with open("../data/encodings/BLOSUM62.json") as f:
+#             encoding_map = json.load(f)
+#         for protein_name in tqdm(data_dict, desc='Generating BLOSUM62 Encodings'):
+#             sequence = data_dict[protein_name]["sequence"]
+#             blosum_encoded = [encoding_map.get(residue, encoding_map["X"]) for residue in sequence]
+#             data_dict[protein_name]["encoding"] = np.array(blosum_encoded, dtype=np.float32)
+    
+#     return data_dict

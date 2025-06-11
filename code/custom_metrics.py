@@ -145,7 +145,7 @@ def get_histogram(y_true, y_pred, output_dir='hist.png'):
 
     plt.figure(figsize=(8, 5))
     plt.hist(errors_per_protein, bins=bins, color='skyblue', edgecolor='black', align='left')
-    plt.xticks(bins)  # Show every integer tick
+    plt.xticks(bins, rotation=45, ha="right")  # Show every integer tick
     plt.xlabel("Number of incorrect residues per protein")
     plt.ylabel("Number of proteins")
     plt.title("Residue Misclassifications per Protein")

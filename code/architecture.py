@@ -116,9 +116,9 @@ def unet(inputs, nb_filters, output_filters=64):
     return step_up
 
 
-def unet_classifier():
-    input_lm_embedds = Input(shape=(UPPER_LENGTH_LIMIT, 1024, 1))
-    flat_lm_embedds = Reshape((UPPER_LENGTH_LIMIT, 1024))(input_lm_embedds)
+def unet_classifier(encoding_length):
+    input_lm_embedds = Input(shape=(UPPER_LENGTH_LIMIT, encoding_length, 1))
+    flat_lm_embedds = Reshape((UPPER_LENGTH_LIMIT, encoding_length))(input_lm_embedds)
 
     model = unet(flat_lm_embedds, 32, 32)
 
