@@ -8,7 +8,7 @@ import pickle
 from train import prepare_training_pair
 from sklearn.preprocessing import StandardScaler
 import json
-from data_loading import read_seq_csv
+from data_loading import read_seq_file
 print(tf.config.list_physical_devices('GPU'))
 
 def evaluate(data_dict, results_dir):
@@ -81,13 +81,13 @@ model = unet_classifier(parameters["encoding_length"])
 model.load_weights(os.path.join(run_dir, 'RCL_Unet.h5')) # loads specific model from current run 
 
 if parameters["encoding"] == 'prottrans':
-    with open("../data/test_data.pkl", "rb") as f:
-        data_dict = pickle.load(f)
+    serpin_dict = read_seq_file("../data/test_data.pkl", 'prottrans')
+    non_serpin_dict = read_seq_file("../data/non_serpin_test.csv", 'prottrans')
 elif parameters["encoding"] == 'onehot':
-    serpin_dict = read_seq_csv("../data/Uniprot Test Set.csv", 'onehot')
-    non_serpin_dict = read_seq_csv("../data/non_serpin_test.csv", 'onehot')
+    serpin_dict = read_seq_file("../data/Uniprot Test Set.csv", 'onehot')
+    non_serpin_dict = read_seq_file("../data/non_serpin_test.csv", 'onehot')
 elif parameters["encoding"] == 'blosum':
-    data_dict = read_seq_csv("../data/Uniprot Test Set.csv", 'blosum')
+    data_dict = read_seq_file("../data/Uniprot Test Set.csv", 'blosum')
 
 evaluate(serpin_dict, serpin_dir)
 evaluate(non_serpin_dict, non_serpin_dir)

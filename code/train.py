@@ -2,9 +2,10 @@
 import os
 import json
 import numpy as np
-from data_loading import read_train_csv, fill_array_with_value, standardize_data
+from collections import defaultdict
+from data_loading import read_seq_file, fill_array_with_value, standardize_data
 from architecture import unet_classifier
-from custom_metrics import get_confusion_matrix, masked_acc, masked_f1, get_histogram
+from custom_metrics import get_confusion_matrix, masked_acc, masked_f1, get_histogram, masked_auc
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import pickle
@@ -28,7 +29,13 @@ def load_dataset(filepath, encoding='onehot', scaling=True, run_dir=''):
             data_dict = pickle.load(f)
     else:
         print("reading from csv")
-        data_dict = read_train_csv(filepath, encoding)
+        serpin_dict = read_seq_file(filepath, encoding)
+        non_serpin_dict = read_seq_file('../data/non_serpin_train.csv', encoding)
+        data_dict = defaultdict(dict)
+        # for k in set(serpin_dict) | set(non_serpin_dict):
+        #     data_dict[k] = {**serpin_dict.get(k, {}), **non_serpin_dict.get(k, {})}
+        data_dict.update(serpin_dict)
+        data_dict.update(non_serpin_dict)
 
     X = []
     Y = []
@@ -69,8 +76,8 @@ def load_dataset(filepath, encoding='onehot', scaling=True, run_dir=''):
 
     return X_train, X_val, Y_train, Y_val
 
-def train_model(X_train, X_val, Y_train, Y_val, output_path="RCL_Unet.h5"):
-    model = unet_classifier()
+def train_model(X_train, X_val, Y_train, Y_val, encoding_length, output_path="RCL_Unet.h5"):
+    model = unet_classifier(encoding_length)
     callbacks = [
         ModelCheckpoint(output_path, monitor="val_loss", save_best_only=True, verbose=1),
         EarlyStopping(monitor="val_loss", patience=3, restore_best_weights=True),
@@ -105,18 +112,18 @@ if __name__ == "__main__":
 
     run_dir = create_run_dir()
 
-    # data = "../data/Alphafold RCL annotations.csv"
-    data = "../data/train_data.pkl"
+    data = "../data/Alphafold RCL annotations.csv"
+    # data = "../data/train_data.pkl"
     model_output_path = (f"{run_dir}/RCL_Unet.h5")
 
     print("🔄 Loading and processing data...")
     X_train, X_val, Y_train, Y_val = load_dataset(data, encoding, scaling, run_dir)
 
     # save data 
-    np.savez_compressed("../data/val_data.npz", X_val=X_val, Y_val=Y_val)
+    # np.savez_compressed("../data/val_data.npz", X_val=X_val, Y_val=Y_val)
 
     print("🧠 Training model...")
-    model = train_model(X_train, X_val, Y_train, Y_val, output_path=model_output_path)
+    model = train_model(X_train, X_val, Y_train, Y_val, encoding_length=encoding_length, output_path=model_output_path)
 
     Y_pred = model.predict(X_val, batch_size=32)
 
@@ -126,7 +133,8 @@ if __name__ == "__main__":
         "scaling": scaling,
         "val_accuracy": float(masked_acc(Y_val, Y_pred)),
         "val_f1": float(masked_f1(Y_val, Y_pred)),
-        "val_macro_f1": float(masked_f1(Y_val, Y_pred, average='macro'))
+        "val_macro_f1": float(masked_f1(Y_val, Y_pred, average='macro')),
+        "val_auc": float(masked_auc(Y_val, Y_pred))
     }
     with open(os.path.join(run_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
