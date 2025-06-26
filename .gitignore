@@ -3,3 +3,6 @@
 /code/venv/
 code/processed_dict_1024.pkl
 code/processed_dict.pkl
+code/app/__pycache__/
+code/__pycache__/
+

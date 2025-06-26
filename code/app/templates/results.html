@@ -1,0 +1,17 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+    .highlight {
+        background-color: yellow;
+        font-weight: bold;
+    }
+    </style>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    {{ plot_html | safe }}
+    <p>{{ highlighted_text | safe }}</p>
+</body>
+</html>

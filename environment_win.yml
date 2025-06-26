@@ -1,0 +1,12 @@
+name: rcl-env
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+dependencies:
+  - python==3.8.5
+  - cudatoolkit=11.2
+  - cudnn=8.1.0
+prefix: /blue/zhou/jason.liang/conda/envs/rcl-env

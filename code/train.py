@@ -106,8 +106,8 @@ def create_run_dir(base_dir="../data/models/runs"):
 
 if __name__ == "__main__":
 
-    encoding = 'prottrans'
-    encoding_length = 1024
+    encoding = 'onehot'
+    encoding_length = 21
     scaling = True
 
     run_dir = create_run_dir()
