@@ -3,7 +3,7 @@ import os
 from tensorflow.keras.models import load_model
 import tensorflow as tf
 from custom_metrics import masked_acc, mcc_cc_loss, mcc_metric, get_histogram, get_confusion_matrix, masked_f1, masked_auc
-from architecture import unet_classifier
+from architecture import unet_classifier, cnn_classifier, lstm_classifier
 import pickle
 from train import prepare_training_pair, UPPER_LENGTH_LIMIT
 from sklearn.preprocessing import StandardScaler
@@ -11,7 +11,7 @@ import json
 from data_loading import read_seq_file, fill_array_with_value
 print(tf.config.list_physical_devices('GPU'))
 
-def evaluate(data_dict, results_dir):
+def evaluate(data_dict, results_dir, run_dir):
     # serpins 
     X = []
     Y = []
@@ -43,6 +43,17 @@ def evaluate(data_dict, results_dir):
         X_test = X_test_flat_scaled.reshape(N, T, D, C)
 
     # perform inference
+    with open(os.path.join(run_dir, 'metrics.json')) as f:
+        parameters = json.load(f) 
+
+    if parameters["model_type"] == 'unet':
+        model = unet_classifier(parameters["encoding_length"])
+    elif parameters["model_type"] == 'cnn':
+        model = cnn_classifier(parameters["encoding_length"])
+    elif parameters["model_type"] == 'lstm':
+        model = lstm_classifier(parameters["encoding_length"])
+
+    model.load_weights(os.path.join(run_dir, 'RCL_Unet.h5')) # loads specific model from current run 
     Y_pred = model.predict(X_test)
 
     # metrics 
@@ -68,7 +79,7 @@ def evaluate(data_dict, results_dir):
     with open(os.path.join(results_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
 
-def evaluate_sequence(sequence, run_dir = "../data/models/runs/run_007/"):
+def evaluate_sequence(sequence, run_dir = "../data/models/runs/run_008/"):
     # serpins 
     X = []
     # Y = []
@@ -112,14 +123,21 @@ def evaluate_sequence(sequence, run_dir = "../data/models/runs/run_007/"):
     # perform inference
     with open(os.path.join(run_dir, 'metrics.json')) as f:
         parameters = json.load(f) 
-    model = unet_classifier(parameters["encoding_length"])
+
+    if parameters["model_type"] == 'unet':
+        model = unet_classifier(parameters["encoding_length"])
+    elif parameters["model_type"] == 'cnn':
+        model = cnn_classifier(parameters["encoding_length"])
+    elif parameters["model_type"] == 'lstm':
+        model = lstm_classifier(parameters["encoding_length"])
+
     model.load_weights(os.path.join(run_dir, 'RCL_Unet.h5')) # loads specific model from current run 
     Y_pred = model.predict(X_test)
     return Y_pred[0, :, 1]
 
 
 def main():
-    run_dir = "../data/models/runs/run_007/"
+    run_dir = "../data/models/runs/run_010/"
     serpin_dir = os.path.join(run_dir, 'results_serpin')
     non_serpin_dir = os.path.join(run_dir, 'results_non_serpin')
     os.makedirs(serpin_dir, exist_ok=True)
@@ -128,8 +146,8 @@ def main():
     with open(os.path.join(run_dir, 'metrics.json')) as f:
         parameters = json.load(f) 
 
-    model = unet_classifier(parameters["encoding_length"])
-    model.load_weights(os.path.join(run_dir, 'RCL_Unet.h5')) # loads specific model from current run 
+    # model = unet_classifier(parameters["encoding_length"])
+    # model.load_weights(os.path.join(run_dir, 'RCL_Unet.h5')) # loads specific model from current run 
 
     if parameters["encoding"] == 'prottrans':
         serpin_dict = read_seq_file("../data/test_data.pkl", 'prottrans')
@@ -140,8 +158,8 @@ def main():
     elif parameters["encoding"] == 'blosum':
         data_dict = read_seq_file("../data/Uniprot Test Set.csv", 'blosum')
 
-    evaluate(serpin_dict, serpin_dir)
-    evaluate(non_serpin_dict, non_serpin_dir)
+    evaluate(serpin_dict, serpin_dir, run_dir)
+    evaluate(non_serpin_dict, non_serpin_dir, run_dir)
 
 if __name__ == "__main__":
     main()

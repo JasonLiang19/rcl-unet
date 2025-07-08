@@ -4,7 +4,7 @@ import json
 import numpy as np
 from collections import defaultdict
 from data_loading import read_seq_file, fill_array_with_value, standardize_data
-from architecture import unet_classifier
+from architecture import unet_classifier, cnn_classifier, lstm_classifier
 from custom_metrics import get_confusion_matrix, masked_acc, masked_f1, get_histogram, masked_auc
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
@@ -76,8 +76,17 @@ def load_dataset(filepath, encoding='onehot', scaling=True, run_dir=''):
 
     return X_train, X_val, Y_train, Y_val
 
-def train_model(X_train, X_val, Y_train, Y_val, encoding_length, output_path="RCL_Unet.h5"):
-    model = unet_classifier(encoding_length)
+def train_model(X_train, X_val, Y_train, Y_val, encoding_length, model_type = 'unet', output_path="RCL_Unet.h5"):
+    if model_type == 'unet':
+        model = unet_classifier(encoding_length)
+    elif model_type == 'cnn':
+        model = cnn_classifier(encoding_length)
+    elif model_type == 'lstm':
+        model = lstm_classifier(encoding_length)
+    else:
+        print('invalid model type')
+        return
+    
     callbacks = [
         ModelCheckpoint(output_path, monitor="val_loss", save_best_only=True, verbose=1),
         EarlyStopping(monitor="val_loss", patience=3, restore_best_weights=True),
@@ -106,6 +115,7 @@ def create_run_dir(base_dir="../data/models/runs"):
 
 if __name__ == "__main__":
 
+    model_type = 'lstm'
     encoding = 'onehot'
     encoding_length = 21
     scaling = True
@@ -123,11 +133,12 @@ if __name__ == "__main__":
     # np.savez_compressed("../data/val_data.npz", X_val=X_val, Y_val=Y_val)
 
     print("🧠 Training model...")
-    model = train_model(X_train, X_val, Y_train, Y_val, encoding_length=encoding_length, output_path=model_output_path)
+    model = train_model(X_train, X_val, Y_train, Y_val, encoding_length=encoding_length, model_type=model_type, output_path=model_output_path)
 
     Y_pred = model.predict(X_val, batch_size=32)
 
     metrics = {
+        "model_type": model_type,
         "encoding": encoding,
         "encoding_length": encoding_length,
         "scaling": scaling,

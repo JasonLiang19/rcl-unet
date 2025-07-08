@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plotly Horizontal Zoom Demo</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        #plot {
+            width: 100%;
+            height: 600px;
+        }
+        .controls {
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        button {
+            margin: 5px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>P01009 - Alpha-1-antitrypsin</h1>
+        <div class="controls">
+            <button onclick="resetZoom()">Reset Zoom</button>
+            <button onclick="toggleScrollZoom()">Toggle Scroll Zoom: <span id="scrollStatus">ON</span></button>
+            <span style="margin-left: 20px;">Use mouse wheel over plot for horizontal zoom</span>
+        </div>
+        <div id="plot"></div>
+    </div>
+
+    <script>
+        // Generate sample data similar to AiuPred disorder prediction
+        function generateDisorderData() {
+            const length = 450;
+            const x = [];
+            const y = [];
+            
+            for (let i = 0; i < length; i++) {
+                x.push(i);
+                // Create a disorder pattern with high disorder at start and some peaks
+                let disorder = 0.1;
+                if (i < 50) {
+                    disorder = 0.6 + 0.3 * Math.sin(i * 0.3) * Math.exp(-i * 0.05);
+                } else {
+                    disorder = 0.1 + 0.15 * Math.sin(i * 0.02) + 0.1 * Math.random();
+                    if (i > 150 && i < 180) disorder += 0.2;
+                    if (i > 220 && i < 250) disorder += 0.25;
+                    if (i > 400) disorder += 0.2;
+                }
+                y.push(Math.max(0, Math.min(1, disorder)));
+            }
+            return { x, y };
+        }
+
+        const data = generateDisorderData();
+        
+        // Create disorder regions (above 0.5 threshold)
+        const disorderRegions = [];
+        let inRegion = false;
+        let regionStart = 0;
+        
+        for (let i = 0; i < data.y.length; i++) {
+            if (data.y[i] > 0.5 && !inRegion) {
+                regionStart = i;
+                inRegion = true;
+            } else if (data.y[i] <= 0.5 && inRegion) {
+                disorderRegions.push({ start: regionStart, end: i - 1 });
+                inRegion = false;
+            }
+        }
+        if (inRegion) {
+            disorderRegions.push({ start: regionStart, end: data.x.length - 1 });
+        }
+
+        // Create the plot
+        const trace = {
+            x: data.x,
+            y: data.y,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'AiuPred-disorder',
+            line: { color: 'red', width: 2 }
+        };
+
+        // Add threshold line
+        const thresholdTrace = {
+            x: [0, data.x.length - 1],
+            y: [0.5, 0.5],
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Threshold',
+            line: { color: 'gray', width: 1, dash: 'dash' },
+            showlegend: false
+        };
+
+        const layout = {
+            title: {
+                text: 'P01009 - Alpha-1-antitrypsin',
+                font: { size: 20 }
+            },
+            xaxis: {
+                title: 'Residue Position',
+                range: [0, data.x.length - 1],
+                showgrid: true,
+                gridcolor: '#e5e5e5'
+            },
+            yaxis: {
+                title: 'Disorder Probability',
+                range: [0, 1.1],
+                showgrid: true,
+                gridcolor: '#e5e5e5'
+            },
+            plot_bgcolor: 'white',
+            paper_bgcolor: 'white',
+            showlegend: true,
+            legend: {
+                x: 1,
+                y: 1,
+                xanchor: 'right',
+                yanchor: 'top'
+            },
+            shapes: [],
+            annotations: []
+        };
+
+        // Add disorder region rectangles
+        disorderRegions.forEach(region => {
+            layout.shapes.push({
+                type: 'rect',
+                xref: 'x',
+                yref: 'paper',
+                x0: region.start,
+                x1: region.end,
+                y0: 0,
+                y1: 1,
+                fillcolor: 'rgba(255, 0, 0, 0.2)',
+                line: { width: 0 }
+            });
+        });
+
+        // Add domain annotations
+        const domains = [
+            { name: 'PFAM', start: 80, end: 370, color: 'lightblue' },
+            { name: 'EXP_DIS', start: 25, end: 55, color: 'red' },
+            { name: 'PTM', start: 380, end: 380, color: 'olive' }
+        ];
+
+        domains.forEach((domain, index) => {
+            const yPosition = -0.15 - (index * 0.08);
+            
+            if (domain.start === domain.end) {
+                // Point annotation for PTM
+                layout.shapes.push({
+                    type: 'circle',
+                    xref: 'x',
+                    yref: 'paper',
+                    x0: domain.start - 2,
+                    x1: domain.start + 2,
+                    y0: yPosition - 0.02,
+                    y1: yPosition + 0.02,
+                    fillcolor: domain.color,
+                    line: { width: 0 }
+                });
+            } else {
+                // Rectangle for domains
+                layout.shapes.push({
+                    type: 'rect',
+                    xref: 'x',
+                    yref: 'paper',
+                    x0: domain.start,
+                    x1: domain.end,
+                    y0: yPosition - 0.02,
+                    y1: yPosition + 0.02,
+                    fillcolor: domain.color,
+                    line: { width: 0 }
+                });
+            }
+            
+            layout.annotations.push({
+                x: 0,
+                y: yPosition,
+                xref: 'paper',
+                yref: 'paper',
+                text: domain.name,
+                showarrow: false,
+                font: { size: 12, color: 'gray' },
+                xanchor: 'right'
+            });
+        });
+
+        const config = {
+            responsive: true,
+            displayModeBar: true,
+            scrollZoom: false, // We'll handle this manually
+            modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+            doubleClick: 'reset'
+        };
+
+        Plotly.newPlot('plot', [trace, thresholdTrace], layout, config);
+
+        // Custom horizontal zoom with mouse wheel
+        let scrollZoomEnabled = true;
+        
+        function setupScrollZoom() {
+            const plotDiv = document.getElementById('plot');
+            
+            plotDiv.addEventListener('wheel', function(e) {
+                if (!scrollZoomEnabled) return;
+                
+                e.preventDefault();
+                
+                // Get mouse position relative to the plot area
+                const plotBounds = plotDiv.querySelector('.plotly .xy').getBoundingClientRect();
+                const mouseX = e.clientX - plotBounds.left;
+                const mouseXFraction = mouseX / plotBounds.width;
+                
+                // Get current x-axis range
+                const currentRange = plotDiv.layout.xaxis.range;
+                const rangeSize = currentRange[1] - currentRange[0];
+                
+                // Calculate mouse position in data coordinates
+                const mouseDataX = currentRange[0] + mouseXFraction * rangeSize;
+                
+                // Determine zoom factor
+                const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
+                const newRangeSize = rangeSize * zoomFactor;
+                
+                // Calculate new range centered on mouse position
+                const minX = 0;
+                const maxX = data.x.length - 1;
+                
+                let newStart = mouseDataX - mouseXFraction * newRangeSize;
+                let newEnd = mouseDataX + (1 - mouseXFraction) * newRangeSize;
+                
+                // Prevent zooming beyond data bounds
+                if (newStart < minX) {
+                    newStart = minX;
+                    newEnd = newStart + newRangeSize;
+                }
+                if (newEnd > maxX) {
+                    newEnd = maxX;
+                    newStart = newEnd - newRangeSize;
+                }
+                
+                // Prevent over-zooming
+                const minRangeSize = 10;
+                const maxRangeSize = maxX - minX;
+                
+                if (newRangeSize < minRangeSize) {
+                    // When at minimum zoom, keep mouse position fixed
+                    newStart = mouseDataX - mouseXFraction * minRangeSize;
+                    newEnd = mouseDataX + (1 - mouseXFraction) * minRangeSize;
+                    
+                    // Adjust if out of bounds
+                    if (newStart < minX) {
+                        newStart = minX;
+                        newEnd = newStart + minRangeSize;
+                    }
+                    if (newEnd > maxX) {
+                        newEnd = maxX;
+                        newStart = newEnd - minRangeSize;
+                    }
+                } else if (newRangeSize > maxRangeSize) {
+                    newStart = minX;
+                    newEnd = maxX;
+                }
+                
+                // Update the plot
+                Plotly.relayout(plotDiv, {
+                    'xaxis.range': [newStart, newEnd]
+                });
+            });
+        }
+        
+        function resetZoom() {
+            const plotDiv = document.getElementById('plot');
+            Plotly.relayout(plotDiv, {
+                'xaxis.range': [0, data.x.length - 1]
+            });
+        }
+        
+        function toggleScrollZoom() {
+            scrollZoomEnabled = !scrollZoomEnabled;
+            document.getElementById('scrollStatus').textContent = scrollZoomEnabled ? 'ON' : 'OFF';
+        }
+        
+        // Initialize scroll zoom after plot is created
+        setupScrollZoom();
+    </script>
+    
+</body>
+</html>

@@ -1,17 +1,51 @@
-
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <style>
-    .highlight {
-        background-color: yellow;
-        font-weight: bold;
-    }
-    </style>
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RCL Prediction Results</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/biojs-vis-sequence@latest/build/biojs-vis-sequence.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
 </head>
 <body>
-    {{ plot_html | safe }}
-    <p>{{ highlighted_text | safe }}</p>
+  <div class="container">
+    <h1>RCL Prediction Results</h1>
+    
+
+    <div id="plot">
+      {{ plot_html | safe }}
+    </div>
+
+    <p style="font-family: monospace; font-size: 20px;">{{ highlighted_text | safe }}</p>
+
+    <div id="seq-viewer"></div>
+    <div class="seq-container">
+      {% set line_size = 40 %}
+      {% for line_start in range(0, sequence|length, line_size) %}
+        <div class="seq-line">
+          <span class="seq-number">{{ line_start + 1 }}</span>
+          <span class="seq-text">
+            {% for i in range(line_size) %}
+              {% set seq_idx = line_start + i %}
+              {% if seq_idx < sequence|length %}
+                {% set char = sequence[seq_idx] %}
+                {% if seq_idx in rcl_indices %}
+                  <span class="highlight">{{ char }}</span>
+                {% else %}
+                  {{ char }}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+          </span>
+        </div>
+      {% endfor %}
+    </div>
+
+  </div>
+
+
+
 </body>
 </html>

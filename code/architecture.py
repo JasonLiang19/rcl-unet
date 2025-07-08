@@ -2,7 +2,7 @@ import glob
 import os
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.layers import Lambda, add, multiply, BatchNormalization, Dense, Dropout, Input, Average, Conv1D, Concatenate, AvgPool1D, UpSampling1D, Reshape, Activation, Cropping1D, ZeroPadding1D
+from tensorflow.keras.layers import Lambda, add, multiply, BatchNormalization, Dense, Dropout, Input, Average, Conv1D, Concatenate, AvgPool1D, UpSampling1D, Reshape, Activation, Cropping1D, ZeroPadding1D, Bidirectional, LSTM
 from custom_metrics import *
 from data_loading import NB_RESIDUES, UPPER_LENGTH_LIMIT
 
@@ -129,6 +129,52 @@ def unet_classifier(encoding_length):
     model.compile(**CLASSIFIER_COMPILE_SETTINGS)
 
     return model   
+
+def cnn_classifier(encoding_length):
+    input_lm_embedds = Input(shape=(UPPER_LENGTH_LIMIT, encoding_length, 1))
+    
+    # Flatten the channel dimension for Conv1D
+    flat_input = Reshape((UPPER_LENGTH_LIMIT, encoding_length))(input_lm_embedds)
+    
+    x = Conv1D(256, kernel_size=7, padding='same', activation='relu')(flat_input)
+    x = BatchNormalization()(x)
+    x = Dropout(0.3)(x)
+
+    x = Conv1D(128, kernel_size=5, padding='same', activation='relu')(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.3)(x)
+
+    x = Conv1D(64, kernel_size=5, padding='same', activation='relu')(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.3)(x)
+
+    x = Conv1D(32, kernel_size=3, padding='same', activation='relu')(x)
+    x = BatchNormalization()(x)
+    
+    # Output logits (2-class per residue)
+    logits = Dense(2, activation='relu')(x)
+    output = Activation('softmax', name='dis')(logits)
+
+    model = Model(inputs=input_lm_embedds, outputs=output)
+    model.compile(**CLASSIFIER_COMPILE_SETTINGS)
+
+    return model
+
+def lstm_classifier(encoding_length):
+    input_tensor = Input(shape=(UPPER_LENGTH_LIMIT, encoding_length, 1))
+    x = Reshape((UPPER_LENGTH_LIMIT, encoding_length))(input_tensor)
+
+    x = Bidirectional(LSTM(256, return_sequences=True))(x)
+    x = Dropout(0.3)(x)
+    x = Bidirectional(LSTM(128, return_sequences=True))(x)
+
+    x = Dense(64, activation='relu')(x)
+    x = Dense(2, activation='relu')(x)
+    output = Activation('softmax', name='dis')(x)
+
+    model = Model(inputs=input_tensor, outputs=output)
+    model.compile(**CLASSIFIER_COMPILE_SETTINGS)
+    return model
 
 
 def build_ensemble():
