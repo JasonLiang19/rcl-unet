@@ -15,16 +15,16 @@ def results():
     # indices_to_highlight = {1, 4, 7}
 
     # sequence = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
-    probs = [0.01, 0.02, 0.05, 0.12, 0.3, 0.4, 0.55, 0.7, 0.82, 0.9,
-            0.8, 0.7, 0.65, 0.55, 0.52, 0.49, 0.4, 0.3, 0.2, 0.1,
-            0.01, 0.01, 0.03, 0.05, 0.12, 0.2, 0.35, 0.51, 0.65, 0.7,
-            0.8, 0.9, 0.95]
-    pred_indices = [6,7,8,9,10,11,12,13,14,27,28,29,30,31,32]
+    # probs = [0.01, 0.02, 0.05, 0.12, 0.3, 0.4, 0.55, 0.7, 0.82, 0.9,
+    #         0.8, 0.7, 0.65, 0.55, 0.52, 0.49, 0.4, 0.3, 0.2, 0.1,
+    #         0.01, 0.01, 0.03, 0.05, 0.12, 0.2, 0.35, 0.51, 0.65, 0.7,
+    #         0.8, 0.9, 0.95]
+    # pred_indices = [6,7,8,9,10,11,12,13,14,27,28,29,30,31,32]
 
-    sequence = "MPSSVSWGILLLAGLCCLVPVSLAEDPQGDAAQKTDTSHHDQDHPTFNKITPNLAEFAFSLYRQLAHQSNSTNIFFSPVSIATAFAMLSLGTKADTHDEILEGLNFNLTEIPEAQIHEGFQELLRTLNQPDSQLQLTTGNGLFLSEGLKLVDKFLEDVKKLYHSEAFTVNFGDTEEAKKQINDYVEKGTQGKIVDLVKELDRDTVFALVNYIFFKGKWERPFEVKDTEEEDFHVDQVTTVKVPMMKRLGMFNIQHCKKLSSWVLLMKYLGNATAIFFLPDEGKLQHLENELTHDIITKFLENEDRRSASLHLPKLSITGTYDLKSVLGQLGITKVFSNGADLSGVTEEAPLKLSKAVHKAVLTIDEKGTEAAGAMFLEAIPMSIPPEVKFNKPFVFLMIEQNTKSPLFMGKVVNPTQK"
-    # sequence = request.form.get("sequence")
-    # probs = evaluate_sequence(sequence)
-    # pred_indices = np.where(probs > 0.5)[0]
+    # sequence = "MPSSVSWGILLLAGLCCLVPVSLAEDPQGDAAQKTDTSHHDQDHPTFNKITPNLAEFAFSLYRQLAHQSNSTNIFFSPVSIATAFAMLSLGTKADTHDEILEGLNFNLTEIPEAQIHEGFQELLRTLNQPDSQLQLTTGNGLFLSEGLKLVDKFLEDVKKLYHSEAFTVNFGDTEEAKKQINDYVEKGTQGKIVDLVKELDRDTVFALVNYIFFKGKWERPFEVKDTEEEDFHVDQVTTVKVPMMKRLGMFNIQHCKKLSSWVLLMKYLGNATAIFFLPDEGKLQHLENELTHDIITKFLENEDRRSASLHLPKLSITGTYDLKSVLGQLGITKVFSNGADLSGVTEEAPLKLSKAVHKAVLTIDEKGTEAAGAMFLEAIPMSIPPEVKFNKPFVFLMIEQNTKSPLFMGKVVNPTQK"
+    sequence = request.form.get("sequence")
+    probs = evaluate_sequence(sequence)
+    pred_indices = np.where(probs > 0.5)[0]
 
     # Plot
     fig = go.Figure()
@@ -36,7 +36,7 @@ def results():
         mode="markers",
         marker=dict(size=0.1, color="rgba(0,0,0,0)"),  # invisible
         hoverinfo="text",
-        text=[f"{sequence[i]} (Pos {i+1})" for i in pred_indices]
+        #text=[f"{sequence[i]} (Pos {i+1})" for i in pred_indices]
     ))
 
     # Add individual red rectangles

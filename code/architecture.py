@@ -4,7 +4,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.layers import Lambda, add, multiply, BatchNormalization, Dense, Dropout, Input, Average, Conv1D, Concatenate, AvgPool1D, UpSampling1D, Reshape, Activation, Cropping1D, ZeroPadding1D, Bidirectional, LSTM
 from custom_metrics import *
-from data_loading import NB_RESIDUES, UPPER_LENGTH_LIMIT
+from data_loading import UPPER_LENGTH_LIMIT
 
 CLASSIFIER_COMPILE_SETTINGS = {'optimizer': Adam(amsgrad=True), 'loss': mcc_cc_loss, 'metrics': [masked_acc, mcc_metric]}
 

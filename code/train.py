@@ -2,8 +2,9 @@
 import os
 import json
 import numpy as np
+import pandas as pd 
 from collections import defaultdict
-from data_loading import read_seq_file, fill_array_with_value, standardize_data
+from data_loading import prepare_train_set
 from architecture import unet_classifier, cnn_classifier, lstm_classifier
 from custom_metrics import get_confusion_matrix, masked_acc, masked_f1, get_histogram, masked_auc
 from tensorflow.keras.utils import to_categorical
@@ -13,69 +14,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.preprocessing import StandardScaler
 
-UPPER_LENGTH_LIMIT = 1024
-MASK_VALUE = 9999
-
-def prepare_training_pair(prottrans_embed, label_vector, max_len=UPPER_LENGTH_LIMIT):
-    X = np.expand_dims(fill_array_with_value(prottrans_embed, max_len, 0), axis=-1)
-    Y = fill_array_with_value(label_vector, max_len, np.array([MASK_VALUE, MASK_VALUE]))
-    return X, Y
-
-def load_dataset(filepath, encoding='onehot', scaling=True, run_dir=''):
-
-    if filepath.endswith('.pkl'):
-        print("📂 Loading existing data_dict...")
-        with open(filepath, "rb") as f:
-            data_dict = pickle.load(f)
-    else:
-        print("reading from csv")
-        serpin_dict = read_seq_file(filepath, encoding)
-        non_serpin_dict = read_seq_file('../data/non_serpin_train.csv', encoding)
-        data_dict = defaultdict(dict)
-        # for k in set(serpin_dict) | set(non_serpin_dict):
-        #     data_dict[k] = {**serpin_dict.get(k, {}), **non_serpin_dict.get(k, {})}
-        data_dict.update(serpin_dict)
-        data_dict.update(non_serpin_dict)
-
-    X = []
-    Y = []
-
-    for protein_name in data_dict:
-
-        # Assume ProtTrans features already computed and available
-        encoded_protein = data_dict[protein_name]["encoding"]
-        label_vector = data_dict[protein_name]["label"]
-
-        x, y = prepare_training_pair(encoded_protein, label_vector)
-        X.append(x)
-        Y.append(y)
-
-    X = np.stack(X)
-    Y = np.stack(Y)
-
-    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
-
-    if (scaling):
-        N_train, T, D, C = X_train.shape
-        N_val = len(X_val)
-        print("scaling data")
-
-        # Remove last dimension and flatten to (N*T, D)
-        X_train_flat = X_train.reshape(-1, D)  # shape: (N*1024, 1024)
-        X_val_flat = X_val.reshape(-1, D)  # shape: (N*1024, 1024)
-
-        scaler = StandardScaler()
-        X_train_flat_scaled = scaler.fit_transform(X_train_flat)
-        X_val_flat_scaled = scaler.transform(X_val_flat)
-
-        X_train = X_train_flat_scaled.reshape(N_train, T, D, C)
-        X_val = X_val_flat_scaled.reshape(N_val, T, D, C)
-
-        with open(os.path.join(run_dir, "scaler.pkl"), "wb") as f:
-            pickle.dump(scaler, f)
-
-    return X_train, X_val, Y_train, Y_val
-
+# takes split and scaled data, instantiates and trains a model based on encoding length and model architecture 
 def train_model(X_train, X_val, Y_train, Y_val, encoding_length, model_type = 'unet', output_path="RCL_Unet.h5"):
     if model_type == 'unet':
         model = unet_classifier(encoding_length)
@@ -87,10 +26,13 @@ def train_model(X_train, X_val, Y_train, Y_val, encoding_length, model_type = 'u
         print('invalid model type')
         return
     
+    # monitors performance on validation set and stops training if performance doesnt improve after (patience = n) epochs 
     callbacks = [
         ModelCheckpoint(output_path, monitor="val_loss", save_best_only=True, verbose=1),
         EarlyStopping(monitor="val_loss", patience=3, restore_best_weights=True),
     ]
+
+    # trains model
     model.fit(
         X_train, Y_train,
         validation_data=(X_val, Y_val),
@@ -99,11 +41,12 @@ def train_model(X_train, X_val, Y_train, Y_val, encoding_length, model_type = 'u
         shuffle=True,
         callbacks=callbacks
     )
+
     print(f"✅ Model training complete. Saved to: {output_path}")
     return model
 
-# keeps track of version 
-def create_run_dir(base_dir="../data/models/runs"):
+# keeps track of version number 
+def create_model_dir(base_dir="../models/runs"):
     os.makedirs(base_dir, exist_ok=True)
 
     existing_runs = [d for d in os.listdir(base_dir) if d.startswith("run_")]
@@ -115,26 +58,40 @@ def create_run_dir(base_dir="../data/models/runs"):
 
 if __name__ == "__main__":
 
-    model_type = 'lstm'
-    encoding = 'onehot'
-    encoding_length = 21
+    # ======================= USER CONFIGURATION ========================
+
+    # set parameters 
+    model_type = 'unet' # unet, lstm, cnn
+    encoding = 'onehot' # onehot, blosum, prottrans
     scaling = True
 
-    run_dir = create_run_dir()
+    # select training files 
+    serpin_file = "../data/Alphafold RCL annotations.csv"
+    non_serpin_file = "../data/non_serpin_train.csv"
 
-    data = "../data/Alphafold RCL annotations.csv"
-    # data = "../data/train_data.pkl"
-    model_output_path = (f"{run_dir}/RCL_Unet.h5")
+    # ===================================================================
 
-    print("🔄 Loading and processing data...")
-    X_train, X_val, Y_train, Y_val = load_dataset(data, encoding, scaling, run_dir)
+    if encoding == 'onehot':
+        encoding_length = 21
+    elif encoding == 'blosum':
+        encoding_length = 20
+    elif encoding == 'prottrans':
+        encoding_length = 1024
+    else:
+        raise ValueError("invalid encoding")
+         
+    
+    # call function to load, scale, and split data 
+    print("loading and processing data...")
+    run_dir = create_model_dir()
+    X_train, X_val, Y_train, Y_val = prepare_train_set(serpin_file, non_serpin_file, encoding, scaling, run_dir)
 
-    # save data 
-    # np.savez_compressed("../data/val_data.npz", X_val=X_val, Y_val=Y_val)
-
-    print("🧠 Training model...")
+    # call model training function 
+    print("training model...")
+    model_output_path = (f"{run_dir}/RCL_{model_type}.h5")
     model = train_model(X_train, X_val, Y_train, Y_val, encoding_length=encoding_length, model_type=model_type, output_path=model_output_path)
 
+    # calculate performance on validation set, save paramters and metrics 
     Y_pred = model.predict(X_val, batch_size=32)
 
     metrics = {
@@ -150,6 +107,7 @@ if __name__ == "__main__":
     with open(os.path.join(run_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
 
+    # generating and saving figures 
     cm = get_confusion_matrix(Y_val, Y_pred, output_dir=f'{run_dir}')
     hist = get_histogram(Y_val, Y_pred, output_dir=f'{run_dir}')
 

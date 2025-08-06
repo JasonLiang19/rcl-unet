@@ -1,88 +1,83 @@
 import os
-import csv
-from glob import glob
+import sys 
 import numpy as np
-from tensorflow.keras.utils import to_categorical
-from collections import defaultdict
-from copy import deepcopy
 import pandas as pd
-from transformers import T5Model, T5EncoderModel
-from bio_embeddings.embed import ProtTransT5XLU50Embedder
-from tqdm import tqdm 
 import json
 import pickle
+from collections import defaultdict
+
+from tqdm import tqdm 
+
+from tensorflow.keras.utils import to_categorical
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+
+from transformers import T5Model, T5EncoderModel
+from bio_embeddings.embed import ProtTransT5XLU50Embedder
 
 # define problem properties
-FASTA_RESIDUE_LIST = ["A", "D", "N", "R", "C", "E", "Q", "G", "H", "I",
-                      "L", "K", "M", "F", "P", "S", "T", "W", "Y", "V"]
-NB_RESIDUES = len(FASTA_RESIDUE_LIST)
-RESIDUE_DICT = dict(zip(FASTA_RESIDUE_LIST, range(NB_RESIDUES)))
+# FASTA_RESIDUE_LIST = ["A", "D", "N", "R", "C", "E", "Q", "G", "H", "I",
+#                       "L", "K", "M", "F", "P", "S", "T", "W", "Y", "V"]
+# NB_RESIDUES = len(FASTA_RESIDUE_LIST)
+# RESIDUE_DICT = dict(zip(FASTA_RESIDUE_LIST, range(NB_RESIDUES)))
 UPPER_LENGTH_LIMIT = 1024
+MASK_VALUE = 9999
 
+# reads fasta file, returns python dictionary with encoded sequences 
+def read_fasta_file(filepath: str, encoding):
 
-# def read_fasta(filepath: str):
-#     # Read all non-empty lines from FASTA
-#     with open(filepath, 'r') as reader:
-#         lines = [line.strip() for line in reader if line.strip() != '']
+    # Read all non-empty lines from FASTA
+    with open(filepath, 'r') as reader:
+        lines = [line.strip() for line in reader if line.strip() != '']
     
-#     protein_names = []
-#     sequences = []
-#     new_sequence = True
-#     for line in lines:
-#         if line.startswith((">", ";")):
-#             protein_names.append(line[1:].strip())
-#             new_sequence = True
-#         elif new_sequence:
-#             sequences.append(line)
-#             new_sequence = False
-#         else:
-#             sequences[-1] = f"{sequences[-1]}{line}"
+    protein_names = []
+    sequences = []
+    new_sequence = True
+    for line in lines:
+        if line.startswith((">", ";")):
+            protein_names.append(line[1:].strip())
+            new_sequence = True
+        elif new_sequence:
+            sequences.append(line)
+            new_sequence = False
+        else:
+            sequences[-1] = f"{sequences[-1]}{line}"
     
-#     data_dict = defaultdict(dict)
-#     for protein_name, resnames in zip(protein_names, sequences):
-#         sequence = to_categorical([RESIDUE_DICT[residue] for residue in resnames], num_classes=NB_RESIDUES)
-#         data_dict[protein_name]["fasta"] = sequence
+    data_dict = defaultdict(dict)
+    for protein_name, resnames in zip(protein_names, sequences):
+        data_dict[protein_name]["sequence"] = resnames
 
-#     print(len(data_dict), "proteins loaded")
+    # apply encoding 
+    encoded_dict = encode_dict(data_dict, encoding)
+    
+    print(len(data_dict), "proteins loaded")
+    return encoded_dict
 
-#     return data_dict
-
-def read_seq_file(filepath: str, encoding: str):
-
-    # existing pickled data_dict 
-    if filepath.endswith('.pkl'):
-        print("📂 Loading existing data_dict...")
-        with open(filepath, "rb") as f:
-            data_dict = pickle.load(f)
-            return data_dict
+# reads csv file with labeled rcl information, returns python dictionary with encoded sequences and per-index labels 
+def read_csv_file(filepath: str, encoding):
 
     data_dict = defaultdict(dict)
 
-    # Load entire CSV as DataFrame
+    # read csv
     df = pd.read_csv(filepath)
-    df = df[df["Sequence"].str.len() <= UPPER_LENGTH_LIMIT]
-
-    if 'rcl_seq' in df.columns:
-        df = df.dropna(subset=['rcl_seq']) # get rid of rows without annotation 
     
-    # Iterate row by row
+    # filter for length limit, get rid of rows without annotation 
+    df = df[df["Sequence"].str.len() <= UPPER_LENGTH_LIMIT]
+    if 'rcl_seq' in df.columns:
+        df = df.dropna(subset=['rcl_seq']) 
+    
+    # iterate protein by protein 
     for _, row in df.iterrows():
 
+        # reads id and sequence 
         protein_id = row["id"].strip()
-
-        # fasta
         sequence = row["Sequence"].strip()
         data_dict[protein_id]["sequence"] = sequence
 
-        # one-hot encoded sequence 
-        # encoded_sequence = to_categorical([RESIDUE_DICT[residue] for residue in sequence], num_classes=NB_RESIDUES)
-        # data_dict[protein_id]["one-hot"] = encoded_sequence
-
-        # create labels 
+        # creating labels 
         rcl_label = np.full((UPPER_LENGTH_LIMIT, 2), [1, 0], dtype=np.float32)  # all non-RCL by default
 
-        # Apply RCL labels (convert to 0-based indexing)
-        if 'rcl_seq' in df.columns:
+        if 'rcl_seq' in df.columns: # if rcl_seq is not a column in the csv, it is the control dataset, and all labels remain non-RCL
 
             rcl_start = int(row['rcl_start'])
             rcl_end = int(row['rcl_end'])
@@ -92,13 +87,23 @@ def read_seq_file(filepath: str, encoding: str):
             for i in range(rcl_start_idx, rcl_end_idx):
                 rcl_label[i] = [0, 1]
 
-        # Mask out padding if sequence is shorter than max_length
+        # if sequence is shorter than max_length, apply mask to remaining indices
         for i in range(len(sequence), UPPER_LENGTH_LIMIT):
             rcl_label[i] = [9999, 9999]
 
         data_dict[protein_id]['label'] = rcl_label
 
-    # prottrans    
+    # apply encoding 
+    encoded_dict = encode_dict(data_dict, encoding)
+    
+    return encoded_dict
+
+# applies encoding to sequences in a dictionary 
+def encode_dict(data_dict, encoding: str):
+
+    encoding = encoding.lower()
+
+    # ProtTransLM protein language model encoding 
     if (encoding == 'prottrans'):
         print("Loading ProtTrans model")   
         embedder = OfflineProtTransT5XLU50Embedder()
@@ -106,8 +111,8 @@ def read_seq_file(filepath: str, encoding: str):
             # uses unencoded sequence
             data_dict[protein_name]["encoding"] = embedder.embed(data_dict[protein_name]["sequence"])
 
-    # one-hot
-    if (encoding == 'onehot'):
+    # one-hot encoding
+    elif (encoding == 'onehot'):
         with open("../data/encodings/One_hot.json") as f:
             encoding_map = json.load(f)
         for protein_name in tqdm(data_dict, desc='Generating One-hot Encodings'):
@@ -115,29 +120,164 @@ def read_seq_file(filepath: str, encoding: str):
             one_hot_encoded = [encoding_map.get(residue, encoding_map["X"]) for residue in sequence]
             data_dict[protein_name]["encoding"] = np.array(one_hot_encoded, dtype=np.float32)
 
-    # BLOSUM
-    if (encoding == 'blosum'):
+    # BLOSUM62 based encoding
+    elif (encoding == 'blosum'):
         with open("../data/encodings/BLOSUM62.json") as f:
             encoding_map = json.load(f)
         for protein_name in tqdm(data_dict, desc='Generating BLOSUM62 Encodings'):
             sequence = data_dict[protein_name]["sequence"]
             blosum_encoded = [encoding_map.get(residue, encoding_map["X"]) for residue in sequence]
             data_dict[protein_name]["encoding"] = np.array(blosum_encoded, dtype=np.float32)
+
+    # invalid encoding name
+    else:
+        print(f"{encoding} in an invalid encoding")
+        sys.exit()
     
     return data_dict
 
+# pads out length of encoded protein sequence and label 
+def prepare_training_pair(encoded_protein, label_vector, max_len=UPPER_LENGTH_LIMIT):
+    X = np.expand_dims(fill_array_with_value(encoded_protein, max_len, 0), axis=-1)
+    Y = fill_array_with_value(label_vector, max_len, np.array([MASK_VALUE, MASK_VALUE]))
+    return X, Y
 
-def standardize_data(data_dict: dict):
+# trains new scaler and scales training data using scikit-learn's StandardScaler, saves scaler object 
+def scale_training_data(X_train, X_val, save_dir):
 
-    mean = np.load(os.path.join("data_stats", "train_mean_prottrans.npy"))
-    std = np.load(os.path.join("data_stats", "train_std_prottrans.npy"))
+    # num residues, length, dimensions, extra channel 
+    N_train, T, D, C = X_train.shape
+    N_val = len(X_val)
+    print("scaling data")
 
-    for key in data_dict.keys():
-        data_dict[key]["prottrans"] = (data_dict[key]["prottrans"] - mean) / std
+    # StandardScaler only works on 2 dimensions, so remove last dimension and flatten to (N*T, D)
+    X_train_flat = X_train.reshape(-1, D)
+    X_val_flat = X_val.reshape(-1, D)
 
-    return data_dict
+    # apply scaling 
+    scaler = StandardScaler()
+    X_train_flat_scaled = scaler.fit_transform(X_train_flat)
+    X_val_flat_scaled = scaler.transform(X_val_flat)
 
+    # after scaling, reshape to original shape 
+    X_train = X_train_flat_scaled.reshape(N_train, T, D, C)
+    X_val = X_val_flat_scaled.reshape(N_val, T, D, C)
 
+    # save scaler file so it can be used when model is used 
+    with open(os.path.join(save_dir, "scaler.pkl"), "wb") as f:
+        pickle.dump(scaler, f)
+
+    return X_train, X_val
+
+# applies existing scaler file to new data 
+def apply_scaler(X, scaler_file):
+
+    with open(scaler_file, "rb") as f:
+        scaler = pickle.load(f) 
+
+    N, T, D, C = X.shape
+    print("scaling data")
+
+    # reshape to 2 dimensions, apply scaler, and restore original shape
+    X_flat = X.reshape(-1, D)  # shape: (N*T, D)
+    X_flat_scaled = scaler.transform(X_flat)
+    X_scaled = X_flat_scaled.reshape(N, T, D, C)
+
+    return X_scaled
+
+# reads labeled csv, splits data, returns scaled data
+def prepare_train_set(serpin_file, non_serpin_file , encoding='onehot', scaling=True, run_dir=''):
+
+    # if filepath.endswith('.pkl'):
+    #     print("📂 Loading existing data_dict...")
+    #     with open(filepath, "rb") as f:
+    #         data_dict = pickle.load(f)
+    # else:
+    
+    print("reading from csv")
+    serpin_dict = read_csv_file(serpin_file, encoding)
+    non_serpin_dict = read_csv_file(non_serpin_file, encoding)
+    
+    data_dict = defaultdict(dict)
+    data_dict.update(serpin_dict)
+    data_dict.update(non_serpin_dict)
+
+    X = []
+    Y = []
+
+    for protein_id in data_dict:
+
+        encoded_protein = data_dict[protein_id]["encoding"]
+        label_vector = data_dict[protein_id]["label"]
+
+        x, y = prepare_training_pair(encoded_protein, label_vector)
+        X.append(x)
+        Y.append(y)
+
+    X = np.stack(X)
+    Y = np.stack(Y)
+
+    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
+
+    if (scaling):
+        X_train, X_val = scale_training_data(X_train, X_val, run_dir)
+
+    return X_train, X_val, Y_train, Y_val
+
+# reads labeled csv, doesn't split data, returns scaled data + list of IDs and sequences  
+def prepare_test_set(filepath: str, encoding: str, scaler_file):
+
+    print("reading from csv")
+    data_dict= read_csv_file(filepath, encoding)
+
+    X = []
+    Y = []
+    id_list = []
+    sequences = []
+
+    for protein_id in data_dict:
+
+        encoded_protein = data_dict[protein_id]["encoding"]
+        label_vector = data_dict[protein_id]["label"]
+        sequence = data_dict[protein_id]["sequence"]
+
+        x, y = prepare_training_pair(encoded_protein, label_vector)
+        X.append(x)
+        Y.append(y)
+        id_list.append(protein_id)
+        sequences.append(sequence)
+
+    X = np.stack(X)
+    Y = np.stack(Y)
+
+    X_scaled = apply_scaler(X, scaler_file)
+
+    return X_scaled, Y, id_list, sequences
+
+# reads unlabeled fasta file, returns scaled data and list of IDs 
+def prepare_unlabeled_set(filepath: str, encoding: str, scaler_file):
+
+    print("reading from fasta")
+    data_dict= read_fasta_file(filepath, encoding)
+
+    X = []
+    id_list = []
+
+    for protein_id in data_dict:
+
+        encoded_protein = data_dict[protein_id]["encoding"]
+
+        x = np.expand_dims(fill_array_with_value(encoded_protein, UPPER_LENGTH_LIMIT, 0), axis=-1)
+        X.append(x)
+        id_list .append(protein_id)
+
+    X = np.stack(X)
+
+    X_scaled = apply_scaler(X, scaler_file)
+
+    return X_scaled, id_list
+
+# fills array with value, considering shape 
 def fill_array_with_value(array: np.array, length_limit: int, value):
 
     filler = value * np.ones((length_limit - array.shape[0], array.shape[1]), array.dtype)
@@ -146,23 +286,12 @@ def fill_array_with_value(array: np.array, length_limit: int, value):
     return filled_array
 
 
-def fill_with_zeros(data: dict, max_sequence_length: int):
-    data_copy = deepcopy(data)
-    for key, values in data_copy.items():
-        if len(values) == UPPER_LENGTH_LIMIT:
-            continue
-        elif len(values) > UPPER_LENGTH_LIMIT:
-            data_copy[key] = values[:UPPER_LENGTH_LIMIT]
-            continue
-        data_copy[key] = fill_array_with_value(values, max_sequence_length, 0)
-
-    return data_copy
-
+# local instance of ProtTransLM 
 class OfflineProtTransT5XLU50Embedder(ProtTransT5XLU50Embedder):
     # Use an offline model directory
     def __init__(self, **kwargs):
         self.necessary_directories = []
-        super().__init__(model_directory=os.path.join('../data/models', "prot_t5_xl_uniref50"))
+        super().__init__(model_directory=os.path.join('../models', "prot_t5_xl_uniref50"))
         self._half_precision_model = False
 
     def get_model(self):
@@ -175,31 +304,24 @@ class OfflineProtTransT5XLU50Embedder(ProtTransT5XLU50Embedder):
             model = T5Model.from_pretrained(self._model_directory)
         return model
     
-def process_non_serpins():
+# def standardize_data(data_dict: dict):
 
-    input_file = "../data/non serpins.tsv"
+#     mean = np.load(os.path.join("data_stats", "train_mean_prottrans.npy"))
+#     std = np.load(os.path.join("data_stats", "train_std_prottrans.npy"))
 
-    # Load the full UniProt TSV
-    df = pd.read_csv(input_file, sep='\t')
-    df.rename(columns={'Entry': 'id'}, inplace=True)
+#     for key in data_dict.keys():
+#         data_dict[key]["prottrans"] = (data_dict[key]["prottrans"] - mean) / std
 
-    # Check number of entries
-    print(f"Total entries loaded: {len(df)}")
+#     return data_dict
 
-    # Filter out sequences containing 'X'
-    filtered_df = df[~df['Sequence'].str.contains('X', na=False)]
-    print(f"Remaining entries after removing sequences with 'X': {len(filtered_df)}")
+# def fill_with_zeros(data: dict, max_sequence_length: int):
+#     data_copy = deepcopy(data)
+#     for key, values in data_copy.items():
+#         if len(values) == UPPER_LENGTH_LIMIT:
+#             continue
+#         elif len(values) > UPPER_LENGTH_LIMIT:
+#             data_copy[key] = values[:UPPER_LENGTH_LIMIT]
+#             continue
+#         data_copy[key] = fill_array_with_value(values, max_sequence_length, 0)
 
-    # randomly split remaining samples
-    train_df = df.sample(frac=.5)
-    test_df = df.drop(train_df.index)
-
-    # Randomly sample from each (set random_state for reproducibility)
-    train_sample = train_df.sample(n=1300, random_state=42)
-    test_sample = test_df.sample(n=1024, random_state=42)
-
-    # Save to new TSV
-    train_sample.to_csv("../data/non_serpin_train_1300.csv", index=False)
-    test_sample.to_csv("../data/non_serpin_test.csv", index=False)
-
-
+#     return data_copy

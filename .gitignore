@@ -1,8 +1,9 @@
-/data/
 /environment/
 /code/venv/
-code/processed_dict_1024.pkl
-code/processed_dict.pkl
+data/processed_dict_1024.pkl
+data/processed_dict.pkl
+data/val_data.npz
 code/app/__pycache__/
 code/__pycache__/
-
+/models/
+/results/
