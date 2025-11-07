@@ -9,9 +9,48 @@ The resulting disorder predictions are saved in separate text files for each seq
  2    E    0.813    1
  ...
 
+# (old) conda setup
  conda create -n rcl-env python=3.8.5
  conda activate rcl-env
  conda install -c conda-forge cudatoolkit=11.2 cudnn=8.1.0
  pip install -r requirements.txt
 export LD_LIBRARY_PATH=/blue/zhou/jason.liang/conda/envs/rcl-env/lib:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+# store models in orange folder
+export TORCH_HOME=/orange/zhou/shared/models/torch_cache
+export HF_HOME=/orange/zhou/shared/models/huggingface 
+
+conda install -c nvidia cuda-toolkit=12.8 cudnn=9.10.2.21 -y
+python -m pip install --index-url https://download.pytorch.org/whl/cu128 torch torchvision torchaudio
+python -m pip install --upgrade transformers
+# (optional, may stay CPU)
+python -m pip install tensorflow==2.18.0
+
+
+trying to set up nvidia container:
+
+## ONE TIME SETUP
+# make a persistent place for conda *as seen from inside the container*
+module load apptainer 
+mkdir -p /blue/zhou/jason.liang/containers/conda_in_container
+apptainer exec --nv \
+  --bind /blue/zhou/jason.liang/containers/conda_in_container:/opt/conda \
+  --bind /blue/zhou/jason.liang:/blue/zhou/jason.liang \
+  --bind /orange/zhou:/orange/zhou \
+  docker://nvcr.io/nvidia/tensorflow:25.01-tf2-py3 \
+  bash -lc '
+    # install miniconda only once
+    if [ ! -x /opt/conda/bin/conda ]; then
+      wget -qO /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+      bash /tmp/miniconda.sh -b -p /opt/conda
+    fi
+    # create your env (adjust packages as needed)
+    /opt/conda/bin/conda create -y -n nvidia-rcl-env python=3.12.11 pandas numpy scikit-learn transformers
+    # quick TensorFlow check using container TF
+    /opt/conda/envs/nvidia-rcl-env/bin/python - <<PY
+import tensorflow as tf
+print("TensorFlow version:", tf.__version__)
+print("GPUs:", tf.config.list_physical_devices("GPU"))
+PY
+  '

@@ -160,7 +160,7 @@ def main():
     # ======================= USER CONFIGURATION ========================
 
     # select model directory 
-    run_dir = "../models/runs/run_011/"
+    run_dir = "../models/runs/run_013/"
 
     # select test dataset files
     serpin_test_set = "../data/Uniprot Test Set.csv"

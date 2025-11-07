@@ -12,8 +12,9 @@ from tensorflow.keras.utils import to_categorical
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
-from transformers import T5Model, T5EncoderModel
-from bio_embeddings.embed import ProtTransT5XLU50Embedder
+from transformers import T5Model, T5EncoderModel, AutoTokenizer, AutoModel
+import torch, re
+# from bio_embeddings.embed import ProtTransT5XLU50Embedder
 
 # define problem properties
 # FASTA_RESIDUE_LIST = ["A", "D", "N", "R", "C", "E", "Q", "G", "H", "I",
@@ -101,18 +102,10 @@ def read_csv_file(filepath: str, encoding):
 # applies encoding to sequences in a dictionary 
 def encode_dict(data_dict, encoding: str):
 
-    encoding = encoding.lower()
-
-    # ProtTransLM protein language model encoding 
-    if (encoding == 'prottrans'):
-        print("Loading ProtTrans model")   
-        embedder = OfflineProtTransT5XLU50Embedder()
-        for protein_name in tqdm(data_dict, desc='Calculating ProtTrans Features'):
-            # uses unencoded sequence
-            data_dict[protein_name]["encoding"] = embedder.embed(data_dict[protein_name]["sequence"])
+    encoding = encoding.lower() # ensure encoding name is lowercase
 
     # one-hot encoding
-    elif (encoding == 'onehot'):
+    if (encoding == 'onehot'):
         with open("../data/encodings/One_hot.json") as f:
             encoding_map = json.load(f)
         for protein_name in tqdm(data_dict, desc='Generating One-hot Encodings'):
@@ -129,9 +122,30 @@ def encode_dict(data_dict, encoding: str):
             blosum_encoded = [encoding_map.get(residue, encoding_map["X"]) for residue in sequence]
             data_dict[protein_name]["encoding"] = np.array(blosum_encoded, dtype=np.float32)
 
+    # ProtTransLM protein language model encoding 
+    # elif (encoding == 'prottrans'):
+    #     print("Loading ProtTrans model")   
+    #     embedder = OfflineProtTransT5XLU50Embedder()
+    #     for protein_name in tqdm(data_dict, desc='Calculating ProtTrans Features'):
+    #         # uses unencoded sequence
+    #         data_dict[protein_name]["encoding"] = embedder.embed(data_dict[protein_name]["sequence"])
+
+    # ESM
+    elif (encoding == 'esm2'):
+        print("Loading ESM2 model")   
+        tokenizer = AutoTokenizer.from_pretrained("facebook/esm2_t33_650M_UR50D")
+        model = AutoModel.from_pretrained("facebook/esm2_t33_650M_UR50D").to("cuda").eval() 
+        for protein_name in tqdm(data_dict, desc='Calculating ProtTrans Features'):
+            seq = data_dict[protein_name]["sequence"]
+            tokens = tokenizer(" ".join(seq), return_tensors="pt")
+            with torch.no_grad():
+                out = model(**{k: v.to("cuda") for k, v in tokens.items()})
+            # strip [CLS]/[EOS]
+            data_dict[protein_name]["encoding"] = out.last_hidden_state[0, 1:-1]  
+
     # invalid encoding name
     else:
-        print(f"{encoding} in an invalid encoding")
+        print(f"{encoding} is an an invalid encoding")
         sys.exit()
     
     return data_dict
@@ -287,22 +301,54 @@ def fill_array_with_value(array: np.array, length_limit: int, value):
 
 
 # local instance of ProtTransLM 
-class OfflineProtTransT5XLU50Embedder(ProtTransT5XLU50Embedder):
-    # Use an offline model directory
-    def __init__(self, **kwargs):
-        self.necessary_directories = []
-        super().__init__(model_directory=os.path.join('../models', "prot_t5_xl_uniref50"))
-        self._half_precision_model = False
+# class OfflineProtTransT5XLU50Embedder(ProtTransT5XLU50Embedder):
+#     # Use an offline model directory
+#     def __init__(self, **kwargs):
+#         self.necessary_directories = []
+#         super().__init__(model_directory=os.path.join('../models', "prot_t5_xl_uniref50"))
+#         self._half_precision_model = False
 
-    def get_model(self):
-        if not self._decoder:
-            print('Using T5EncoderModel')
-            # model = T5EncoderModel.from_pretrained("Rostlab/prot_t5_xl_uniref50")
-            model = T5EncoderModel.from_pretrained(self._model_directory)
-        else:
-            print('Using T5Model')
-            model = T5Model.from_pretrained(self._model_directory)
-        return model
+#     def get_model(self):
+#         if not self._decoder:
+#             print('Using T5EncoderModel')
+#             # model = T5EncoderModel.from_pretrained("Rostlab/prot_t5_xl_uniref50")
+#             model = T5EncoderModel.from_pretrained(self._model_directory)
+#         else:
+#             print('Using T5Model')
+#             model = T5Model.from_pretrained(self._model_directory)
+#         return model
+    
+# huggingface prottranslm
+# class ProtEmbedder:
+#     def __init__(self, model_name="Rostlab/prot_t5_xl_uniref50", device=None):
+#         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+#         self.tokenizer = AutoTokenizer.from_pretrained(model_name, do_lower_case=False)
+#         self.model = AutoModel.from_pretrained(model_name).to(self.device)
+#         self.model.eval()
+
+#     def preprocess(self, sequence: str):
+#         # Replace ambiguous residues and insert spaces
+#         sequence = re.sub(r"[UZOB]", "X", sequence)
+#         return " ".join(list(sequence))
+
+#     def embed(self, sequence: str, per_residue=True):
+#         seq = self.preprocess(sequence)
+#         ids = self.tokenizer(seq, return_tensors="pt", add_special_tokens=True)
+#         input_ids = ids["input_ids"].to(self.device)
+#         attention_mask = ids["attention_mask"].to(self.device)
+
+#         with torch.no_grad():
+#             outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+#             embeddings = outputs.last_hidden_state  # shape: (1, seq_len, hidden_dim)
+
+#         # Remove special tokens ([CLS], [SEP]) and padding
+#         valid_len = attention_mask[0].sum().item()
+#         embeddings = embeddings[0, 1:valid_len-1]
+
+#         if per_residue:
+#             return embeddings.cpu()  # shape: (L, hidden_dim)
+#         else:
+#             return embeddings.mean(dim=0).cpu()  # shape: (hidden_dim,)
     
 # def standardize_data(data_dict: dict):
 

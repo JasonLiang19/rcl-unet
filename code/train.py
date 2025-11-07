@@ -61,8 +61,8 @@ if __name__ == "__main__":
     # ======================= USER CONFIGURATION ========================
 
     # set parameters 
-    model_type = 'unet' # unet, lstm, cnn
-    encoding = 'onehot' # onehot, blosum, prottrans
+    model_type = 'lstm' # unet, lstm, cnn, 
+    encoding = 'onehot' # onehot, blosum, prottrans, esm
     scaling = True
 
     # select training files 
@@ -77,6 +77,8 @@ if __name__ == "__main__":
         encoding_length = 20
     elif encoding == 'prottrans':
         encoding_length = 1024
+    elif encoding == 'esm':
+        encoding_length = 1280
     else:
         raise ValueError("invalid encoding")
          
